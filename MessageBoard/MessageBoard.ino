@@ -59,6 +59,7 @@ void setup() {
   //rtc.adjust(DateTime(2020, 3, 15, 16, 45, 0));
   //printDate();
   //SPI preparations
+  randomSeed(analogRead(0));
   SPI.begin();                //sets SCK, MOSI pins for output (MISO not req'd)
   pinMode(SS, OUTPUT);        //must explicitly declare SS for output
   configMax7219s();           //
@@ -90,13 +91,35 @@ void setup() {
     brightness();
     showActive();
     delay(3000);                  //hold for 3s
-    fadeToBlack();
+    switch (random(4)) {          //currently 4 transitions
+      case 1: transitionRise(); break;
+      case 2: transitionFall(); break;
+      case 3: transitionFade(); break;
+      default: break;             //None
+    }
     delay(500);                   //hold off for 0.5s
     num = (num + 1) % numItems;   //next...
   }
 }
 
-void fadeToBlack() {
+void transitionFall() {
+  for (uint8_t shifts = 0; shifts < 8; shifts++) {
+    for (uint8_t b = 0; b < 128; b++)
+      active[b] <<= 1;
+    showActive();
+    delay(30);
+  }
+}
+void transitionRise() {
+  for (uint8_t shifts = 0; shifts < 8; shifts++) {
+    for (uint8_t b = 0; b < 128; b++)
+      active[b] >>= 1;
+    showActive();
+    delay(30);
+  }
+}
+
+void transitionFade() {
   //timed ramp down the brightness level to 1/32 (at 0x00)
   for (int8_t level = 0x0F; level >= 0; level--) {
     digitalWrite(SS, LOW);
@@ -146,7 +169,7 @@ void showActive() {
       SPI.transfer(col);         // Send (digit) address (eff. column)
       SPI.transfer(active[i]);   // Send (segment) data  (eff. row)
     }
-    digitalWrite(SS, HIGH); //Finish transfer...latch all 16 similar columns
+    digitalWrite(SS, HIGH);     //Finish transfer...latch all 16 similar columns
     clearPrevious();            //? req'd when changing columns...
   }
 }
@@ -177,13 +200,11 @@ void assembleActive() {
   for (uint8_t i = 0; i < strlen(message); i++) {
     char ch = message[i] - 32;
     for (uint8_t j = 0; j < pgm_read_byte_near(charWidth + ch) - 1; j++)
-      //    for (uint8_t j = 0; j < charWidth[ch] - 1; j++)
       active[pos++] = charToPrint[ch][j];
     active[pos++] = 0;
   }
   for (uint8_t i = 0; i < pad; i++)
     active[pos++] = 0;
-  // Serial.println(pos);
 }
 
 void printActive() {
