@@ -1,21 +1,21 @@
 // PROJECT  :MessageBoard
-// PURPOSE  :Pure hardware SPI version of DES Message Board code
+// PURPOSE  :Native hardware SPI version of DES Message Board code
 // COURSE   :*
 // AUTHOR   :C. D'Arcy
 // DATE     :2020 03 15
-// HARDWARE :328P (Nano) on a Breadboard with Chronodot.
+// HARDWARE :328P (Nano) on a Breadboard with Chronodot
 //          :5V/2A Adapter for power.
 //          :Shared common Ground between 5V Supply and Nano
 // STATUS   :Working
 // REFERENCE:https://www.best-microcontroller-projects.com/max7219.html
 // DISPLAY  :http://mail.rsgc.on.ca/~cdarcy/Datasheets/LEDMatrixforDESScrollingDisplay.pdf
 // DRIVER   :https://mail.rsgc.on.ca/~cdarcy/Datasheets/COM-09622-MAX7219-MAX7221.pdf
-// NOTES    :raw SPI implementation is the fastest
-//          :a lot of data has been moved into Program Memory
+// NOTES    :Native hardware SPI implementation is the fastest
+//          :Much of the data has been moved into Program Memory
 #define NUMMATRICES 16
-#include <avr/pgmspace.h>//arrays placed in PROGMEM where necessary
+#include <avr/pgmspace.h>   //arrays placed in PROGMEM where necessary
 #include "Support.h"
-#include <SPI.h>        //hardare->Fastest. SCK,MOSI, & SS from pin_arduino.h 
+#include <SPI.h>            //hardare->Fastest. SCK,MOSI, & SS from pin_arduino.h 
 // MAX7219 SPI LED Driver Command Addresses
 #define MAX7219_DECODE_MODE 0x09 // 
 #define MAX7219_BRIGHTNESS  0x0A // 
@@ -25,11 +25,10 @@
 #define DISPLAY_NORMAL      0x00 //DISPLAYTEST Constants...
 #define DISPLAY_TEST        0x01 //
 
-#include "RTClib.h"              //Chronodot
+#include "RTClib.h"              //Chronodot support
 RTC_DS3231 rtc;                  //
-const char daysOfTheWeek[7][10] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
-const char months[12][10] = {"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"};
-char AMPM[3];
+const char daysOfTheWeek[7][10] = {"SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"};
+const char months[12][10] = {"JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"};
 DateTime now;
 //Place this monster array in Program Memory
 const byte schoolYear[12][32] PROGMEM = { // Day Calendar 2019 - 2020
@@ -53,11 +52,12 @@ char message[128];               //
 void setup() {
   Serial.begin(9600);
   if (!rtc.begin()) {
-     Serial.println(F("Couldn't find RTC"));//macro places String in PROGMEM
+    //F() macro places String in PROGMEM
+    Serial.println(F("Couldn't find RTC"));
     while (1);
   }
   //rtc.adjust(DateTime(2020, 3, 15, 16, 45, 0));
-  printDate();
+  //printDate();
   //SPI preparations
   SPI.begin();                //sets SCK, MOSI pins for output (MISO not req'd)
   pinMode(SS, OUTPUT);        //must explicitly declare SS for output
@@ -67,30 +67,58 @@ void setup() {
   while (true) {              //start rotation
     //Serial.println(num);
     now = rtc.now();
-    uint8_t h = now.hour()%12;
+    uint8_t h = now.hour();
+    char m = h < 12 ? 'A' : 'P';
+    if (h != 12) h %= 12;
     uint8_t dayNum = getDayNum();
     switch (num) {            //Home
-      case 0: sprintf(message, "Home of the RSGC ACES"); break;
+      case 0: sprintf(message, "HOME OF THE RSGC ACES"); break;
       case 1:     //Date...
         sprintf(message, "%s %s %d, %d", daysOfTheWeek[now.dayOfTheWeek()], months[now.month() - 1], now.day(), now.year());
         break;
       case 2:     //Time
-        if (now.hour()==12) h = 12;
-        sprintf(message, "%d:%02d:%02d", h, now.minute(), now.second());
+        sprintf(message, "%d:%02d:%02d %cM", h, now.minute(), now.second(), m);
         break;
       case 3:     //Day
-        sprintf(message, "Day %c", dayNum); break;
+        sprintf(message, "DAY %c", dayNum); break;
       case 4:
-        sprintf(message,"4U: %s","ISP Proposals due"); break;
+        sprintf(message, "4U: %s", "ISP PROPOSALS DUE"); break;
       default: break;
     }
     Serial.println(message);
     assembleActive();
+    brightness();
     showActive();
-    delay(3000);
-    num = (num + 1) % numItems;
+    delay(3000);                  //hold for 3s
+    fadeToBlack();
+    delay(500);                   //hold off for 0.5s
+    num = (num + 1) % numItems;   //next...
   }
-  while (true);
+}
+
+void fadeToBlack() {
+  //timed ramp down the brightness level to 1/32 (at 0x00)
+  for (int8_t level = 0x0F; level >= 0; level--) {
+    digitalWrite(SS, LOW);
+    for (int i = 0; i < NUMMATRICES; i++) {
+      SPI.transfer(MAX7219_BRIGHTNESS);
+      SPI.transfer(level);
+    }
+    digitalWrite(SS, HIGH);
+    delay(30);
+  }
+  //only way to go to black is to erase Display RAM
+  eraseAll();
+}
+
+void brightness() {
+  digitalWrite(SS, LOW);
+  for (int i = 0; i < NUMMATRICES; i++) {
+    SPI.transfer(MAX7219_BRIGHTNESS);
+    SPI.transfer(0x0F);
+  }
+  digitalWrite(SS, HIGH);
+  clearPrevious();            //? req'd when changing columns...
 }
 
 char getDayNum() {
@@ -106,6 +134,7 @@ void eraseAll() {
       SPI.transfer(0);
       digitalWrite(SS, HIGH);
     }
+    clearPrevious();            //? req'd when changing columns...
   }
 }
 
@@ -165,7 +194,7 @@ void printActive() {
   }
 }
 
-void configMax7219s() { 
+void configMax7219s() {
   // First, all LED segments lit to verify
   digitalWrite(SS, LOW);
   for (uint8_t i = 0; i < NUMMATRICES; i++) {
@@ -174,7 +203,7 @@ void configMax7219s() {
   }
   digitalWrite(SS, HIGH);
   //hold for a period...
-  delay(1000);         
+  delay(1000);
   //SETS THE SCAN RATE OF THE MAX'S
   digitalWrite(SS, LOW);
   for (int i = 0; i < NUMMATRICES; i++)  {
