@@ -14,10 +14,10 @@ With time to spare over the COVID-19 March Break of 2020, I had time to revisit 
 A MAX7219 register level fade-to-black, coupled with software-based rise and fall shifts, provides a few transition options, randomly selected.
 
 ### Hardware
-Additional modifications included
-1. Replacing the UNO/Chronodot/Shield with a Nano/Chronodot on a breadbord.
+Additional modifications included:
+1. Replacing the UNO/Chronodot/Shield with a Nano/Chronodot on a breadboard,
 2. Temperature sensing with a TC74 (I2C), and,
-3. Audio Frequency monitoring with the RSGC MSGEQ7 Audio Dock [MSGEQ7 BoB](http://darcy.rsgc.on.ca/ACES/PCBs/index.html#AudioDock) with MAX9814 AGC Mic.
+3. Audio Frequency monitoring with the RSGC ACES MSGEQ7 Audio Dock [MSGEQ7 BoB](http://darcy.rsgc.on.ca/ACES/PCBs/index.html#AudioDock) with MAX9814 AGC Mic.
 
 The power supply remains a 5V2A AC/DC adapter.
 
