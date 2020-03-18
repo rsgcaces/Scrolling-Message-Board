@@ -2,8 +2,8 @@
 // PURPOSE  :Native hardware SPI version of DES Message Board code
 // COURSE   :*
 // AUTHOR   :C. D'Arcy
-// DATE     :2020 03 15
-// HARDWARE :328P (Nano) on a Breadboard with Chronodot
+// DATE     :2020 03 18
+// HARDWARE :328P (Nano) on a Breadboard with Chronodot, MSGEQ7 BoB, TC74
 //          :5V/2A Adapter for power.
 //          :Shared common Ground between 5V Supply and Nano
 // STATUS   :Working
@@ -13,11 +13,15 @@
 // NOTES    :Native hardware SPI implementation is the fastest
 //          :Much of the data has been moved into Program Memory
 #define NUMMATRICES 16
-#include <avr/pgmspace.h>   //arrays placed in PROGMEM where necessary
-#include "Support.h"
-#include <SPI.h>            //hardare->Fastest. SCK,MOSI, & SS from pin_arduino.h 
-// MAX7219 SPI LED Driver Command Addresses
-#define MAX7219_DECODE_MODE 0x09 // 
+#define NUMTRANSITIONS 11
+#define SCROLL_SPEED 30
+#include <Wire.h>
+#define TC74ADDRESS 0x48    //aka B01001000 
+#include <avr/pgmspace.h>   //data arrays placed in PROGMEM 
+#include "Support.h"        //local header file stuffed with data arrays
+#include <SPI.h>            //hardware->Fastest SCK, MOSI & SS defs from pin_arduino.h 
+
+#define MAX7219_DECODE_MODE 0x09 //MAX7219 SPI LED Driver Command Addresses 
 #define MAX7219_BRIGHTNESS  0x0A // 
 #define MAX7219_SCAN_LIMIT  0x0B // 
 #define MAX7219_SHUTDOWN    0x0C // 
@@ -30,21 +34,13 @@ RTC_DS3231 rtc;                  //
 const char daysOfTheWeek[7][10] = {"SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"};
 const char months[12][10] = {"JANUARY", "FEBRUARY", "MARCH", "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER"};
 DateTime now;
-//Place this monster array in Program Memory
-const byte schoolYear[12][32] PROGMEM = { // Day Calendar 2019 - 2020
-  {9, 9, 9, 9, 9, 9, 0, 8, 1, 2, 3, 9, 9, 4, 5, 6, 7, 8, 9, 9, 1, 2, 3, 4, 5, 9, 9, 6, 7, 8, 1, 2}, //january
-  {9, 9, 9, 3, 4, 5, 6, 7, 9, 9, 8, 1, 2, 3, 9, 9, 9, 9, 4, 5, 6, 7, 9, 9, 8, 1, 2, 3, 4, 9}, //february
-  {9, 9, 5, 6, 7, 8, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 1, 2, 3, 4, 9, 9, 5, 6}, //march
-  {9, 7, 8, 1, 9, 9, 2, 3, 4, 5, 9, 9, 9, 9, 6, 7, 8, 1, 9, 9, 2, 3, 4, 5, 6, 9, 9, 7, 8, 1, 2}, //april
-  {9, 3, 9, 9, 4, 5, 6, 7, 8, 9, 9, 1, 2, 3, 4, 5, 9, 9, 9, 6, 7, 8, 1, 9, 9, 2, 3, 4, 5, 6, 9, 9}, // may
-  {9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9}, //june
-  {9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9}, // july
-  {9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9}, //august
-  {9, 9, 9, 9, 9, 1, 2, 9, 9, 3, 4, 5, 6, 7, 9, 9, 8, 1, 2, 3, 0, 9, 9, 4, 5, 6, 7, 8, 9, 9, 1}, // september
-  {9, 2, 3, 4, 5, 9, 9, 6, 7, 8, 1, 2, 9, 9, 9, 3, 4, 5, 6, 9, 9, 7, 8, 1, 2, 3, 9, 9, 4, 5, 6, 7}, //october
-  {9, 8, 9, 9, 1, 2, 3, 4, 9, 9, 9, 9, 5, 6, 7, 8, 9, 9, 1, 2, 3, 4, 5, 9, 9, 6, 7, 8, 1, 2, 9}, //november
-  {9, 9, 3, 4, 5, 6, 7, 9, 9, 8, 1, 2, 3, 4, 9, 9, 5, 6, 7, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9} //december
-};
+uint8_t celsius, fahrenheit;
+// REFERENCE:http://nuewire.com/info-archive/msgeq7-by-j-skoba/
+// NOTES    :http://darcy.rsgc.on.ca/ACES/PCBs/index.html#AudioDock
+#define ANALOGPIN  7      // read from multiplexer using analog input 7
+#define STROBEPIN  2      // strobe is attached to digital pin 2
+#define RESETPIN   3      // reset is attached to digital pin 3
+uint8_t spectrumValues[7];           // to hold A2D values
 
 char active[128];                // Display data arrays...
 char message[128];               //
@@ -58,47 +54,135 @@ void setup() {
   }
   //rtc.adjust(DateTime(2020, 3, 15, 16, 45, 0));
   //printDate();
+  MSGEQ7_Setup();
+  // MSGEQ7_Test();
   //SPI preparations
+  //for (uint8_t i = 0; i < 7; i++)
+  //  Serial.print(pgm_read_byte(&charToPrint[94][i]) + String(" "));
+  //while (1);
+
   randomSeed(analogRead(0));
   SPI.begin();                //sets SCK, MOSI pins for output (MISO not req'd)
   pinMode(SS, OUTPUT);        //must explicitly declare SS for output
-  configMax7219s();           //
+  configMax7219s();           //sets registers for all 16 7219s
   uint8_t num = 0;
-  uint8_t numItems = 5;
+  uint8_t numItems = 7;
   while (true) {              //start rotation
-    //Serial.println(num);
     now = rtc.now();
     uint8_t h = now.hour();
     char m = h < 12 ? 'A' : 'P';
     if (h != 12) h %= 12;
     uint8_t dayNum = getDayNum();
-    switch (num) {            //Home
-      case 0: sprintf(message, "HOME OF THE RSGC ACES"); break;
+    switch (num) {
+      case 0:     //Home
+        sprintf(message, "HOME OF THE RSGC ACES"); break;
       case 1:     //Date...
-        sprintf(message, "%s %s %d, %d", daysOfTheWeek[now.dayOfTheWeek()], months[now.month() - 1], now.day(), now.year());
+        sprintf(message, "%s %s %d", daysOfTheWeek[now.dayOfTheWeek()], months[now.month() - 1], now.day());
         break;
       case 2:     //Time
         sprintf(message, "%d:%02d:%02d %cM", h, now.minute(), now.second(), m);
         break;
       case 3:     //Day
         sprintf(message, "DAY %c", dayNum); break;
-      case 4:
-        sprintf(message, "4U: %s", "ISP PROPOSALS DUE"); break;
-      default: break;
+      case 4:     //Temp
+        getTemp(celsius, fahrenheit);
+        sprintf(message, "TEMP: %2dC  %2dF", celsius, fahrenheit);
+        break;
+      case 5:     //Weekly Note(s)
+        sprintf(message, "%s: ISP PROPOSAL DUE", "4U"); break;
+      case 6:     //Equalizer
+        showEqualizer();
+        break;
+      default: break;   //should never happen
     }
-    Serial.println(message);
-    assembleActive();
-    brightness();
-    showActive();
-    delay(3000);                  //hold for 3s
-    switch (random(4)) {          //currently 4 transitions
+    //Serial.println(message);
+    //No way to turn brightness completely off ? (min: 1/32)
+    //so, only way to go blank is to erase Display RAM ?
+    eraseAll();           //be sure display is off before updating
+    if (num != 6)
+      assembleActive();     //update the buffer for the next message
+    showActive();         //update the display while blank
+    uint8_t which = random(NUMTRANSITIONS);
+    if (which != 3) {      //for all transitions except Fade in
+      brightness();        //full brightness
+      if (num != 6)
+        delay(3000);         //hold for 3s before beginning transition out...
+    }
+    switch (which) {       //currently 4 transitions
       case 1: transitionRise(); break;
       case 2: transitionFall(); break;
-      case 3: transitionFade(); break;
-      default: break;             //None
+      case 3: transitionFadeIn(); delay(3000); break;  //bring up the lights!
+      case 4: transitionFadeOut(); break;
+      case 5: transitionL2R(); break;
+      case 6: transitionR2L(); break;
+      case 7: transitionPacManL2R(); break;
+      case 8: transitionBlinkyL2R(); break;
+      case 9: transitionMelt(); break;
+      case 10: transitionSlice(); break;
+      default: break;                       //None
     }
-    delay(500);                   //hold off for 0.5s
-    num = (num + 1) % numItems;   //next...
+    delay(500);                             //hold off for 0.5s
+    num = (num + 1) % numItems;             //next...
+  }
+}
+
+void transitionSlice() {
+  for (uint8_t a = 0; a < 128; a++)
+    for (uint8_t b = 0; b < 8; b++) {
+      active[a] <<= 1;
+      showActive();
+      delay(1);
+    }
+
+}
+
+void transitionMelt() {
+  uint16_t times = 0;
+  while (times++ < 1500) {
+    active[random(128)] <<= 1;
+    showActive();
+    delayMicroseconds(100);
+  }
+}
+
+
+void transitionPacManL2R() {
+  for (uint8_t a = 1; a < 129; a++) {
+    for (uint8_t b = 0; b < 8; b++)
+      active[a + b] = pgm_read_byte(&pacMan[a % 2][b]);
+    active[a - 1] = 0;
+    showActive();
+    delay(SCROLL_SPEED);
+  }
+}
+
+void transitionBlinkyL2R() {
+  for (uint8_t a = 1; a < 129; a++) {
+    for (uint8_t b = 0; b < 8; b++)
+      active[a + b] = pgm_read_byte(&blinky[a % 2][b]);
+    active[a - 1] = 0;
+    showActive();
+    delay(SCROLL_SPEED);
+  }
+}
+
+
+void transitionL2R() {
+  for (uint8_t a = 0; a < 128; a++) {
+    for (int8_t b = 126; b > 0; b--)
+      active[b + 1] = active[b];
+    active[0] = 0;
+    showActive();
+    delay(SCROLL_SPEED);
+  }
+}
+void transitionR2L() {
+  for (uint8_t a = 0; a < 128; a++) {
+    for (int8_t b = 1; b < 127; b++)
+      active[b - 1] = active[b];
+    active[127] = 0;
+    showActive();
+    delay(SCROLL_SPEED);
   }
 }
 
@@ -107,7 +191,7 @@ void transitionFall() {
     for (uint8_t b = 0; b < 128; b++)
       active[b] <<= 1;
     showActive();
-    delay(30);
+    delay(SCROLL_SPEED);
   }
 }
 void transitionRise() {
@@ -115,11 +199,24 @@ void transitionRise() {
     for (uint8_t b = 0; b < 128; b++)
       active[b] >>= 1;
     showActive();
-    delay(30);
+    delay(SCROLL_SPEED);
   }
 }
 
-void transitionFade() {
+void transitionFadeIn() {
+  //timed ramp down the brightness level to 1/32 (at 0x00)
+  for (int8_t level = 0; level <= 0x0F; level++) {
+    digitalWrite(SS, LOW);
+    for (int i = 0; i < NUMMATRICES; i++) {
+      SPI.transfer(MAX7219_BRIGHTNESS);
+      SPI.transfer(level);
+    }
+    digitalWrite(SS, HIGH);
+    delay(SCROLL_SPEED << 1);
+  }
+}
+
+void transitionFadeOut() {
   //timed ramp down the brightness level to 1/32 (at 0x00)
   for (int8_t level = 0x0F; level >= 0; level--) {
     digitalWrite(SS, LOW);
@@ -128,7 +225,7 @@ void transitionFade() {
       SPI.transfer(level);
     }
     digitalWrite(SS, HIGH);
-    delay(30);
+    delay(SCROLL_SPEED);
   }
   //only way to go to black is to erase Display RAM
   eraseAll();
@@ -147,6 +244,41 @@ void brightness() {
 char getDayNum() {
   uint8_t dayNum = pgm_read_byte(&schoolYear[now.month() - 1][now.day()]);
   return dayNum < 9 ? '0' + dayNum : 'H';
+}
+
+void getTemp(uint8_t &celsius, uint8_t &fahrenheit) {
+  Wire.beginTransmission(TC74ADDRESS); //alert the device a request is imminent
+  Wire.write(0);          //inform device that the master is interested in Register 0
+  Wire.endTransmission(); //terminate transmission
+
+  Wire.requestFrom(TC74ADDRESS, 1); //request 1 byte from the device with specified address
+  while (Wire.available() == 0);    //wait for response
+  celsius = Wire.read();     //read 1 byte from SDA buffer into a variable
+  fahrenheit = round(celsius * 1.8 + 32.0);  //convert from celsius to fahrenheit
+  Serial.print(String(celsius) + "C,\t");         //echo data to the Serial Monitor
+  Serial.print(String(fahrenheit, 1) + "F\n");
+}
+
+void showEqualizer() {
+  sprintf(message, "EQUALIZER: M"); //M to be replaced by active audio data
+  assembleActive();                 //update the buffer for the next message
+
+  uint32_t stamp = millis();
+
+  while (millis() - stamp < 7000) {
+    digitalWrite(RESETPIN, HIGH);   //reset to first frequency..
+    digitalWrite(RESETPIN, LOW);
+    for (int i = 0; i < 7; i++)  {
+      digitalWrite(STROBEPIN, LOW);
+      delayMicroseconds(30); // to allow the output to settle
+      spectrumValues[i] = analogRead(ANALOGPIN) >> 7;  //0..7
+      digitalWrite(STROBEPIN, HIGH);
+    }
+    // update active buffer with spectrum values..
+    for (uint8_t i = 0; i < 7; i++)
+      active[89 + i] =  pgm_read_byte_near(&eqLevels[spectrumValues[i]]);
+    showActive();           //update the display while blank
+  }
 }
 
 void eraseAll() {
@@ -200,7 +332,7 @@ void assembleActive() {
   for (uint8_t i = 0; i < strlen(message); i++) {
     char ch = message[i] - 32;
     for (uint8_t j = 0; j < pgm_read_byte_near(charWidth + ch) - 1; j++)
-      active[pos++] = charToPrint[ch][j];
+      active[pos++] = pgm_read_byte_near(&charToPrint[ch][j]);
     active[pos++] = 0;
   }
   for (uint8_t i = 0; i < pad; i++)
@@ -293,4 +425,31 @@ void printDate() {
   Serial.print(':');
   Serial.print(now.second(), DEC);
   Serial.println();
+}
+
+void MSGEQ7_Setup() {   //MSGEQ7 Preparations
+  pinMode(ANALOGPIN, INPUT);
+  pinMode(STROBEPIN, OUTPUT);
+  pinMode(RESETPIN, OUTPUT);
+  analogReference(DEFAULT);
+  digitalWrite(RESETPIN, LOW);
+  digitalWrite(STROBEPIN, HIGH);
+}
+
+void MSGEQ7_Test() {
+  while (1) {
+    digitalWrite(RESETPIN, HIGH);   //reset to first frequency..
+    digitalWrite(RESETPIN, LOW);
+
+    for (int i = 0; i < 7; i++)  {
+      digitalWrite(STROBEPIN, LOW);
+      delayMicroseconds(30); // to allow the output to settle
+      //     spectrumValue[i] = analogRead(analogPin);
+      spectrumValues[i] = (1 << (analogRead(ANALOGPIN) >> 7)) - 1;
+      Serial.print(spectrumValues[i], HEX);
+      Serial.print('\t');
+      digitalWrite(STROBEPIN, HIGH);
+    }
+    Serial.println();
+  }
 }
